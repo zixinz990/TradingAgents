@@ -45,12 +45,17 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+INTRADAY_CACHE_TTL_SECONDS = 300
+
+
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 15 years of data up to today and caches per symbol. On
+    Downloads ~5 years of data up to today and caches per symbol. On
     subsequent calls the cache is reused. Rows after curr_date are
-    filtered out so backtests never see future prices.
+    filtered out so backtests never see future prices. When curr_date
+    reaches today, the cache is refreshed every INTRADAY_CACHE_TTL_SECONDS
+    so intraday re-runs see fresh bars rather than the morning's snapshot.
     """
     # Reject ticker values that would escape the cache directory when
     # interpolated into the cache filename (e.g. ``../../tmp/x``).
@@ -59,11 +64,11 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     config = get_config()
     curr_date_dt = pd.to_datetime(curr_date)
 
-    # Cache uses a fixed window (15y to today) so one file per symbol
-    today_date = pd.Timestamp.today()
+    today_date = pd.Timestamp.today().normalize()
     start_date = today_date - pd.DateOffset(years=5)
     start_str = start_date.strftime("%Y-%m-%d")
-    end_str = today_date.strftime("%Y-%m-%d")
+    # yfinance's `end` is exclusive; bump by one day so today's bar is included.
+    end_str = (today_date + pd.DateOffset(days=1)).strftime("%Y-%m-%d")
 
     os.makedirs(config["data_cache_dir"], exist_ok=True)
     data_file = os.path.join(
@@ -71,7 +76,11 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
     )
 
-    if os.path.exists(data_file):
+    cache_usable = os.path.exists(data_file)
+    if cache_usable and curr_date_dt >= today_date:
+        cache_usable = (time.time() - os.path.getmtime(data_file)) < INTRADAY_CACHE_TTL_SECONDS
+
+    if cache_usable:
         data = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
     else:
         data = yf_retry(lambda: yf.download(

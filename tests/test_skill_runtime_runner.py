@@ -231,6 +231,81 @@ def test_apply_step_rejects_missing_required_marker(tmp_path, monkeypatch):
         runtime.apply_step(report_dir)
 
 
+def test_apply_step_rejects_invalid_trader_final_proposal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    state = read_json(state_path)
+    state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index("trader")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    write_role_report(
+        report_dir,
+        "3_trading/trader.md",
+        "**Action**: Wait\nFINAL TRANSACTION PROPOSAL: **WAIT**",
+    )
+
+    with pytest.raises(ValueError, match="3_trading/trader.md missing valid final transaction proposal"):
+        runtime.apply_step(report_dir)
+
+
+def test_apply_step_rejects_completed_workflow(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    state = read_json(state_path)
+    state["skill_runtime"]["step_index"] = len(state["skill_runtime"]["step_order"])
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="all role steps have already been applied"):
+        runtime.apply_step(report_dir)
+
+
+def test_apply_step_updates_terminal_role_handoffs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    state = read_json(state_path)
+
+    state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index("research_manager")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    manager_report = "**Recommendation**: Buy\n\nmanager plan"
+    write_role_report(report_dir, "2_research/manager.md", manager_report)
+    runtime.apply_step(report_dir)
+    state = read_json(state_path)
+    assert state["investment_plan"] == manager_report
+    assert state["investment_debate_state"]["judge_decision"] == manager_report
+    assert state["investment_debate_state"]["current_response"] == manager_report
+
+    state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index("trader")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    trader_report = "**Action**: Buy\nFINAL TRANSACTION PROPOSAL: **BUY**"
+    write_role_report(report_dir, "3_trading/trader.md", trader_report)
+    runtime.apply_step(report_dir)
+    state = read_json(state_path)
+    assert state["trader_investment_plan"] == trader_report
+    assert state["sender"] == "Trader"
+
+    state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index("portfolio_manager")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    portfolio_report = (
+        "**Rating**: Buy\n"
+        "**Executive Summary**: summary\n"
+        "**Investment Thesis**: thesis"
+    )
+    write_role_report(report_dir, "5_portfolio/decision.md", portfolio_report)
+    runtime.apply_step(report_dir)
+    state = read_json(state_path)
+    assert state["final_trade_decision"] == portfolio_report
+    assert state["risk_debate_state"]["judge_decision"] == portfolio_report
+    assert state["risk_debate_state"]["latest_speaker"] == "Judge"
+
+
 def test_apply_step_updates_debate_and_risk_counters(tmp_path, monkeypatch):
     runtime = load_runtime()
     config = base_config(tmp_path, selected_analysts=["market"])

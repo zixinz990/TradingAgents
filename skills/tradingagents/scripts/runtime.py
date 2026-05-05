@@ -394,6 +394,10 @@ def load_tool_request(path: Path | str) -> dict[str, Any]:
     for key in ("role_id", "tool", "arguments"):
         if key not in request:
             raise ValueError(f"tool_request.json missing required field {key}")
+    if not isinstance(request["role_id"], str):
+        raise ValueError("tool_request.json role_id must be a string")
+    if not isinstance(request["tool"], str):
+        raise ValueError("tool_request.json tool must be a string")
     if not isinstance(request["arguments"], dict):
         raise ValueError("tool_request.json arguments must be an object")
     return request

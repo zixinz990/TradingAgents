@@ -383,6 +383,28 @@ def test_run_tool_request_executes_only_allowed_tool_and_records_transcript(tmp_
     assert state["skill_runtime"]["tool_transcripts"] == [str(transcript_path)]
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("role_id", 123, "tool_request.json role_id must be a string"),
+        ("tool", 123, "tool_request.json tool must be a string"),
+    ],
+)
+def test_load_tool_request_rejects_non_string_role_and_tool(tmp_path, field, value, message):
+    runtime = load_runtime()
+    request = {
+        "role_id": "market_analyst",
+        "tool": "get_stock_data",
+        "arguments": {"symbol": "NVDA"},
+    }
+    request[field] = value
+    request_path = tmp_path / "tool_request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        runtime.load_tool_request(request_path)
+
+
 def test_run_tool_request_rejects_disallowed_tool(tmp_path, monkeypatch):
     runtime = load_runtime()
     config = base_config(tmp_path, selected_analysts=["market"])
@@ -445,7 +467,7 @@ def test_run_tool_request_rejects_when_no_current_role(tmp_path, monkeypatch):
     (report_dir / "tool_request.json").write_text(
         json.dumps(
             {
-                "role_id": None,
+                "role_id": "market_analyst",
                 "tool": "get_stock_data",
                 "arguments": {"symbol": "NVDA"},
             }

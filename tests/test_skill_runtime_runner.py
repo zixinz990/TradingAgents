@@ -99,3 +99,65 @@ def test_init_run_rejects_invalid_config(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="results_dir must be a safe relative path"):
         runtime.init_run(config_path)
+
+
+def test_build_step_order_matches_selected_analysts_and_round_counts(tmp_path):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    config["max_debate_rounds"] = 2
+    config["max_risk_discuss_rounds"] = 1
+
+    assert runtime.build_step_order(config) == [
+        "market_analyst",
+        "bull_researcher",
+        "bear_researcher",
+        "bull_researcher",
+        "bear_researcher",
+        "research_manager",
+        "trader",
+        "risk_aggressive",
+        "risk_conservative",
+        "risk_neutral",
+        "portfolio_manager",
+    ]
+
+
+def test_next_step_emits_role_packet_from_manifest(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    config_path = write_config(tmp_path, config)
+    state_path = runtime.init_run(config_path)
+
+    packet_path = runtime.next_step(state_path.parent)
+    packet = read_json(packet_path)
+
+    assert packet_path == state_path.parent / "next_step.json"
+    assert packet["role_id"] == "market_analyst"
+    assert packet["display_name"] == "Market Analyst"
+    assert packet["source_path"] == "tradingagents/agents/analysts/market_analyst.py"
+    assert packet["report_path"] == "1_analysts/market.md"
+    assert packet["output_path"] == str(state_path.parent / "1_analysts" / "market.md")
+    assert packet["allowed_tools"] == ["get_stock_data", "get_indicators"]
+    assert packet["required_markers"] == []
+    assert packet["input_state"]["company_of_interest"] == "NVDA"
+    assert packet["input_state"]["trade_date"] == "2026-05-04"
+    assert packet["tool_request_path"] == str(state_path.parent / "tool_request.json")
+
+
+def test_next_step_reports_completion_when_all_steps_applied(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    config_path = write_config(tmp_path, config)
+    state_path = runtime.init_run(config_path)
+    state = read_json(state_path)
+    state["skill_runtime"]["step_index"] = len(state["skill_runtime"]["step_order"])
+    state["skill_runtime"]["status"] = "ready_to_finalize"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    packet_path = runtime.next_step(state_path.parent)
+    packet = read_json(packet_path)
+
+    assert packet["status"] == "complete"
+    assert packet["message"] == "all role steps have been applied"

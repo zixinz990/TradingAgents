@@ -139,3 +139,91 @@ def init_run(config_path: Path | str) -> Path:
     report_dir.mkdir(parents=True, exist_ok=True)
     state = initial_state(config, report_dir)
     return save_state(report_dir, state)
+
+
+REQUIRED_MARKERS = {
+    "research_manager": ["**Recommendation**:"],
+    "trader": ["**Action**:", "FINAL TRANSACTION PROPOSAL"],
+    "portfolio_manager": [
+        "**Rating**:",
+        "**Executive Summary**:",
+        "**Investment Thesis**:",
+    ],
+}
+
+
+def load_prompt_manifest() -> dict[str, Any]:
+    return read_json(SKILL_DIR / "prompt_manifest.json")
+
+
+def roles_by_id() -> dict[str, dict[str, Any]]:
+    manifest = load_prompt_manifest()
+    return {role["id"]: role for role in manifest["roles"]}
+
+
+def current_role_id(state: dict[str, Any]) -> str | None:
+    runtime = state["skill_runtime"]
+    step_index = runtime["step_index"]
+    step_order = runtime["step_order"]
+    if step_index >= len(step_order):
+        return None
+    return step_order[step_index]
+
+
+def role_required_markers(role_id: str) -> list[str]:
+    return REQUIRED_MARKERS.get(role_id, [])
+
+
+def packet_input_state(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "company_of_interest": state["company_of_interest"],
+        "trade_date": state["trade_date"],
+        "market_report": state["market_report"],
+        "sentiment_report": state["sentiment_report"],
+        "news_report": state["news_report"],
+        "fundamentals_report": state["fundamentals_report"],
+        "investment_debate_state": state["investment_debate_state"],
+        "investment_plan": state["investment_plan"],
+        "trader_investment_plan": state["trader_investment_plan"],
+        "risk_debate_state": state["risk_debate_state"],
+        "final_trade_decision": state["final_trade_decision"],
+        "past_context": state.get("past_context", ""),
+    }
+
+
+def build_role_packet(state: dict[str, Any], role_id: str) -> dict[str, Any]:
+    role = roles_by_id()[role_id]
+    report_dir = Path(state["skill_runtime"]["report_dir"])
+    output_path = report_dir / role["report_path"]
+    return {
+        "status": "role_ready",
+        "role_id": role_id,
+        "display_name": role["display_name"],
+        "source_path": role["source_path"],
+        "report_path": role["report_path"],
+        "output_path": str(output_path),
+        "allowed_tools": role["allowed_tools"],
+        "required_markers": role_required_markers(role_id),
+        "input_state": packet_input_state(state),
+        "tool_request_path": str(report_dir / "tool_request.json"),
+        "instructions": (
+            "Read source_path from the repository root, preserve the role intent, "
+            "use only this packet's input_state and allowed_tools, then write "
+            "the final role report to output_path."
+        ),
+    }
+
+
+def next_step(report_dir: Path | str) -> Path:
+    state = load_state(report_dir)
+    role_id = current_role_id(state)
+    packet_path = Path(report_dir) / PACKET_FILENAME
+    if role_id is None:
+        return write_json(
+            packet_path,
+            {
+                "status": "complete",
+                "message": "all role steps have been applied",
+            },
+        )
+    return write_json(packet_path, build_role_packet(state, role_id))

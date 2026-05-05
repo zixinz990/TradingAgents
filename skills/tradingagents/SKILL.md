@@ -44,6 +44,25 @@ Do not instantiate provider clients from `tradingagents/llm_clients/` for a skil
 
 Market, news, and fundamentals data still need a source. Prefer user-provided files when available. If live data is required, use existing deterministic dataflow utilities or approved MCP/tools, then include the raw data references in the generated report.
 
+## Automated Agent Run
+
+When the user asks to automate, run automatically, or run to completion, drive the deterministic workflow yourself instead of handing the user each command. A good user prompt is:
+
+```text
+Use the tradingagents skill with this config and run it to completion: path/to/config.json
+```
+
+Automated run protocol:
+
+1. Validate the config with `validate_config.py`.
+2. Run `skill_runner.py init-run` and derive the report directory from the printed `state.json` path.
+3. Loop on `skill_runner.py next-step`.
+4. For each `role_ready` packet, read `source_path`, use the packet's `input_state`, request only approved tools through `tool_request.json` and `run-tool-request` when data is needed, write the role report to `output_path`, then run `skill_runner.py apply-step`.
+5. When `next_step.json` reports completion, run `skill_runner.py finalize-run`.
+6. Return the final rating, `complete_report.md` path, and state log path.
+
+Do not stop after emitting or reading `next_step.json`. Stop only when finalization succeeds, a required data source or credential is unavailable, a runner validation error blocks progress, or the user explicitly asks to pause.
+
 ## Deterministic Runtime Workflow
 
 Use the deterministic runner scripts for skill runs. They preserve the original workflow order, state transitions, role counters, report paths, tool allowlists, final report assembly, and rating extraction while keeping the host coding agent as the model runtime.

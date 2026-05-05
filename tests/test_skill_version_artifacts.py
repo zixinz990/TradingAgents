@@ -93,6 +93,20 @@ def test_skill_docs_explain_deterministic_runner_usage():
         assert "state.json" in text
 
 
+def test_skill_docs_explain_agent_driven_automated_run():
+    readme = (SKILL_DIR / "README.md").read_text(encoding="utf-8")
+    skill_text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    for text in (readme, skill_text):
+        assert "Automated Agent Run" in text
+        assert "run to completion" in text
+        assert "Do not stop after" in text
+        assert "finalize-run" in text
+
+    assert "Use the tradingagents skill with this config and run it to completion" in readme
+    assert "When the user asks to automate" in skill_text
+
+
 def test_prompt_manifest_covers_all_current_agent_roles_without_copying_prompts():
     manifest = json.loads((SKILL_DIR / "prompt_manifest.json").read_text(encoding="utf-8"))
     roles = {role["id"]: role for role in manifest["roles"]}

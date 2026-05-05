@@ -145,6 +145,35 @@ def test_next_step_emits_role_packet_from_manifest(tmp_path, monkeypatch):
     assert packet["tool_request_path"] == str(state_path.parent / "tool_request.json")
 
 
+def test_next_step_emits_required_markers_for_structured_roles(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    config_path = write_config(tmp_path, config)
+    state_path = runtime.init_run(config_path)
+    state = read_json(state_path)
+
+    expected = {
+        "research_manager": ["**Recommendation**:"],
+        "trader": ["**Action**:", "FINAL TRANSACTION PROPOSAL"],
+        "portfolio_manager": [
+            "**Rating**:",
+            "**Executive Summary**:",
+            "**Investment Thesis**:",
+        ],
+    }
+
+    for role_id, markers in expected.items():
+        state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index(role_id)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        packet_path = runtime.next_step(state_path.parent)
+        packet = read_json(packet_path)
+
+        assert packet["role_id"] == role_id
+        assert packet["required_markers"] == markers
+
+
 def test_next_step_reports_completion_when_all_steps_applied(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runtime = load_runtime()

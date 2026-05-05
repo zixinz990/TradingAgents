@@ -620,3 +620,54 @@ def test_skill_runner_cli_init_and_next_step(tmp_path):
     packet_path = Path(next_result.stdout.strip())
     packet = read_json(packet_path)
     assert packet["role_id"] == "market_analyst"
+
+
+def test_skill_runtime_end_to_end_without_llm_calls(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+
+    role_content = {
+        "market_analyst": "market report",
+        "bull_researcher": "bull report",
+        "bear_researcher": "bear report",
+        "research_manager": "**Recommendation**: Buy",
+        "trader": "**Action**: Buy\nFINAL TRANSACTION PROPOSAL: **BUY**",
+        "risk_aggressive": "aggressive risk",
+        "risk_conservative": "conservative risk",
+        "risk_neutral": "neutral risk",
+        "portfolio_manager": (
+            "**Rating**: Buy\n"
+            "**Executive Summary**: summary\n"
+            "**Investment Thesis**: thesis"
+        ),
+    }
+
+    while True:
+        packet_path = runtime.next_step(report_dir)
+        packet = read_json(packet_path)
+        if packet["status"] == "complete":
+            break
+        Path(packet["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(packet["output_path"]).write_text(role_content[packet["role_id"]], encoding="utf-8")
+        runtime.apply_step(report_dir, role_id=packet["role_id"])
+
+    result = runtime.finalize_run(report_dir)
+    state = read_json(state_path)
+
+    assert result["rating"] == "Buy"
+    assert state["skill_runtime"]["status"] == "completed"
+    assert state["skill_runtime"]["completed_steps"] == [
+        "market_analyst",
+        "bull_researcher",
+        "bear_researcher",
+        "research_manager",
+        "trader",
+        "risk_aggressive",
+        "risk_conservative",
+        "risk_neutral",
+        "portfolio_manager",
+    ]
+    assert (report_dir / "complete_report.md").exists()

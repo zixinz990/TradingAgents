@@ -46,17 +46,6 @@ def write_json(path: Path | str, payload: Any) -> Path:
 def load_validated_config(config_path: Path | str) -> dict[str, Any]:
     config = load_config(Path(config_path))
     errors = validate_config(config)
-    results_dir = config.get("results_dir")
-    if (
-        isinstance(results_dir, str)
-        and Path(results_dir).is_absolute()
-        and ".." not in Path(results_dir).parts
-    ):
-        errors = [
-            error
-            for error in errors
-            if error != "results_dir must be a safe relative path"
-        ]
     if errors:
         raise ValueError("; ".join(errors))
     return config

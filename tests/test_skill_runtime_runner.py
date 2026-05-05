@@ -31,7 +31,7 @@ def base_config(tmp_path: Path, selected_analysts: list[str] | None = None) -> d
         "max_debate_rounds": 1,
         "max_risk_discuss_rounds": 1,
         "output_language": "English",
-        "results_dir": str(tmp_path / "skill_runs"),
+        "results_dir": "skill_runs",
         "data_vendors": {
             "core_stock_apis": "yfinance",
             "technical_indicators": "yfinance",
@@ -53,7 +53,8 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_init_run_creates_safe_report_dir_and_initial_state(tmp_path):
+def test_init_run_creates_safe_report_dir_and_initial_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     runtime = load_runtime()
     config = base_config(tmp_path)
     config_path = write_config(tmp_path, config)
@@ -61,7 +62,7 @@ def test_init_run_creates_safe_report_dir_and_initial_state(tmp_path):
     state_path = runtime.init_run(config_path)
     state = read_json(state_path)
 
-    assert state_path == tmp_path / "skill_runs" / "NVDA_2026-05-04" / "state.json"
+    assert state_path.resolve() == tmp_path / "skill_runs" / "NVDA_2026-05-04" / "state.json"
     assert state["company_of_interest"] == "NVDA"
     assert state["trade_date"] == "2026-05-04"
     assert state["messages"] == [{"role": "human", "content": "NVDA"}]
@@ -73,7 +74,7 @@ def test_init_run_creates_safe_report_dir_and_initial_state(tmp_path):
     assert state["risk_debate_state"]["count"] == 0
     assert state["skill_runtime"]["step_index"] == 0
     assert state["skill_runtime"]["completed_steps"] == []
-    assert state["skill_runtime"]["report_dir"] == str(state_path.parent)
+    assert Path(state["skill_runtime"]["report_dir"]).resolve() == state_path.parent.resolve()
     assert state["skill_runtime"]["step_order"][:4] == [
         "market_analyst",
         "social_media_analyst",
@@ -82,11 +83,19 @@ def test_init_run_creates_safe_report_dir_and_initial_state(tmp_path):
     ]
 
 
-def test_init_run_rejects_invalid_config(tmp_path):
+def test_init_run_rejects_invalid_config(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     runtime = load_runtime()
     config = base_config(tmp_path)
     config["ticker"] = "../NVDA"
     config_path = write_config(tmp_path, config)
 
     with pytest.raises(ValueError, match="ticker must be a safe ticker path component"):
+        runtime.init_run(config_path)
+
+    config = base_config(tmp_path)
+    config["results_dir"] = str(tmp_path / "skill_runs")
+    config_path = write_config(tmp_path, config)
+
+    with pytest.raises(ValueError, match="results_dir must be a safe relative path"):
         runtime.init_run(config_path)

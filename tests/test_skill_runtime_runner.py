@@ -343,3 +343,115 @@ def test_apply_step_rejects_unexpected_role_id(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="cannot apply role trader while current role is market_analyst"):
         runtime.apply_step(report_dir, role_id="trader")
+
+
+def test_run_tool_request_executes_only_allowed_tool_and_records_transcript(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+
+    class FakeTool:
+        def invoke(self, arguments):
+            return f"tool output for {arguments['symbol']}"
+
+    monkeypatch.setitem(runtime.TOOL_REGISTRY, "get_stock_data", FakeTool())
+    request_path = report_dir / "tool_request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "role_id": "market_analyst",
+                "tool": "get_stock_data",
+                "arguments": {
+                    "symbol": "NVDA",
+                    "start_date": "2026-04-01",
+                    "end_date": "2026-05-04",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    transcript_path = runtime.run_tool_request(report_dir)
+    transcript = read_json(transcript_path)
+    state = read_json(state_path)
+
+    assert transcript["role_id"] == "market_analyst"
+    assert transcript["tool"] == "get_stock_data"
+    assert transcript["result"] == "tool output for NVDA"
+    assert state["skill_runtime"]["tool_transcripts"] == [str(transcript_path)]
+
+
+def test_run_tool_request_rejects_disallowed_tool(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    (report_dir / "tool_request.json").write_text(
+        json.dumps(
+            {
+                "role_id": "market_analyst",
+                "tool": "get_news",
+                "arguments": {
+                    "ticker": "NVDA",
+                    "start_date": "2026-04-01",
+                    "end_date": "2026-05-04",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="tool get_news is not allowed for role market_analyst"):
+        runtime.run_tool_request(report_dir)
+
+
+def test_run_tool_request_rejects_unsafe_symbol_argument(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    (report_dir / "tool_request.json").write_text(
+        json.dumps(
+            {
+                "role_id": "market_analyst",
+                "tool": "get_stock_data",
+                "arguments": {
+                    "symbol": "../NVDA",
+                    "start_date": "2026-04-01",
+                    "end_date": "2026-05-04",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="symbol must be a safe ticker path component"):
+        runtime.run_tool_request(report_dir)
+
+
+def test_run_tool_request_rejects_when_no_current_role(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    state = read_json(state_path)
+    state["skill_runtime"]["step_index"] = len(state["skill_runtime"]["step_order"])
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    (report_dir / "tool_request.json").write_text(
+        json.dumps(
+            {
+                "role_id": None,
+                "tool": "get_stock_data",
+                "arguments": {"symbol": "NVDA"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="no current role can execute tool requests"):
+        runtime.run_tool_request(report_dir)

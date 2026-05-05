@@ -358,3 +358,108 @@ def apply_step(report_dir: Path | str, role_id: str | None = None) -> Path:
     apply_role_content(state, expected_role_id, content)
     advance_runtime(state, expected_role_id)
     return save_state(report_dir, state)
+
+
+from tradingagents.agents.utils.agent_utils import (  # noqa: E402
+    get_balance_sheet,
+    get_cashflow,
+    get_fundamentals,
+    get_global_news,
+    get_indicators,
+    get_income_statement,
+    get_insider_transactions,
+    get_news,
+    get_stock_data,
+)
+from tradingagents.dataflows.config import set_config  # noqa: E402
+
+
+TOOL_REGISTRY = {
+    "get_stock_data": get_stock_data,
+    "get_indicators": get_indicators,
+    "get_fundamentals": get_fundamentals,
+    "get_balance_sheet": get_balance_sheet,
+    "get_cashflow": get_cashflow,
+    "get_income_statement": get_income_statement,
+    "get_news": get_news,
+    "get_global_news": get_global_news,
+    "get_insider_transactions": get_insider_transactions,
+}
+
+
+def load_tool_request(path: Path | str) -> dict[str, Any]:
+    request = read_json(path)
+    if not isinstance(request, dict):
+        raise ValueError("tool_request.json must contain a JSON object")
+    for key in ("role_id", "tool", "arguments"):
+        if key not in request:
+            raise ValueError(f"tool_request.json missing required field {key}")
+    if not isinstance(request["arguments"], dict):
+        raise ValueError("tool_request.json arguments must be an object")
+    return request
+
+
+def validate_tool_request(state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+    expected_role_id = current_role_id(state)
+    if expected_role_id is None:
+        raise ValueError("no current role can execute tool requests")
+    if request["role_id"] != expected_role_id:
+        raise ValueError(
+            f"tool request role {request['role_id']} does not match current role {expected_role_id}"
+        )
+    role = roles_by_id()[expected_role_id]
+    tool_name = request["tool"]
+    if tool_name not in role["allowed_tools"]:
+        raise ValueError(f"tool {tool_name} is not allowed for role {expected_role_id}")
+    if tool_name not in TOOL_REGISTRY:
+        raise ValueError(f"tool {tool_name} is not registered")
+    for argument_name in ("ticker", "symbol"):
+        if argument_name in request["arguments"]:
+            try:
+                safe_ticker_component(request["arguments"][argument_name])
+            except ValueError as exc:
+                raise ValueError(
+                    f"{argument_name} must be a safe ticker path component"
+                ) from exc
+    return role
+
+
+def invoke_tool(tool_name: str, arguments: dict[str, Any]) -> str:
+    tool = TOOL_REGISTRY[tool_name]
+    if hasattr(tool, "invoke"):
+        result = tool.invoke(arguments)
+    else:
+        result = tool(**arguments)
+    return str(result)
+
+
+def next_tool_transcript_path(report_dir: Path, state: dict[str, Any], role_id: str, tool_name: str) -> Path:
+    index = len(state["skill_runtime"]["tool_transcripts"]) + 1
+    safe_name = f"{index:03d}_{role_id}_{tool_name}.json"
+    return report_dir / "tool_transcripts" / safe_name
+
+
+def run_tool_request(report_dir: Path | str, request_path: Path | str | None = None) -> Path:
+    report_dir = Path(report_dir)
+    request_path = Path(request_path) if request_path is not None else report_dir / "tool_request.json"
+    state = load_state(report_dir)
+    request = load_tool_request(request_path)
+    validate_tool_request(state, request)
+    set_config(state["skill_runtime"]["config"])
+    result = invoke_tool(request["tool"], request["arguments"])
+    transcript_path = next_tool_transcript_path(
+        report_dir,
+        state,
+        request["role_id"],
+        request["tool"],
+    )
+    transcript = {
+        "role_id": request["role_id"],
+        "tool": request["tool"],
+        "arguments": request["arguments"],
+        "result": result,
+    }
+    write_json(transcript_path, transcript)
+    state["skill_runtime"]["tool_transcripts"].append(str(transcript_path))
+    save_state(report_dir, state)
+    return transcript_path

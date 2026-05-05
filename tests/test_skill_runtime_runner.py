@@ -477,3 +477,76 @@ def test_run_tool_request_rejects_when_no_current_role(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="no current role can execute tool requests"):
         runtime.run_tool_request(report_dir)
+
+
+def write_all_reports_for_one_analyst_run(report_dir: Path) -> None:
+    fragments = {
+        "1_analysts/market.md": "market report",
+        "2_research/bull.md": "bull report",
+        "2_research/bear.md": "bear report",
+        "2_research/manager.md": "**Recommendation**: Buy",
+        "3_trading/trader.md": "**Action**: Buy\nFINAL TRANSACTION PROPOSAL: **BUY**",
+        "4_risk/aggressive.md": "aggressive risk",
+        "4_risk/conservative.md": "conservative risk",
+        "4_risk/neutral.md": "neutral risk",
+        "5_portfolio/decision.md": (
+            "**Rating**: Overweight\n"
+            "**Executive Summary**: summary\n"
+            "**Investment Thesis**: thesis"
+        ),
+    }
+    for relative_path, content in fragments.items():
+        write_role_report(report_dir, relative_path, content)
+
+
+def apply_all_steps(runtime, report_dir: Path) -> None:
+    while True:
+        state = read_json(report_dir / "state.json")
+        role_id = runtime.current_role_id(state)
+        if role_id is None:
+            break
+        runtime.apply_step(report_dir)
+
+
+def test_finalize_run_writes_complete_report_state_log_and_rating(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    write_all_reports_for_one_analyst_run(report_dir)
+    apply_all_steps(runtime, report_dir)
+
+    result = runtime.finalize_run(report_dir)
+
+    assert Path(result["complete_report"]).exists()
+    assert Path(result["state_log"]).exists()
+    assert result["rating"] == "Overweight"
+    log = read_json(Path(result["state_log"]))
+    assert log["company_of_interest"] == "NVDA"
+    assert log["market_report"] == "market report"
+    assert log["trader_investment_decision"].startswith("**Action**: Buy")
+    assert log["final_trade_decision"].startswith("**Rating**: Overweight")
+
+
+def test_finalize_run_rejects_incomplete_workflow(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+
+    with pytest.raises(ValueError, match="cannot finalize before all role steps are applied"):
+        runtime.finalize_run(state_path.parent)
+
+
+def test_parity_check_reports_structural_differences(tmp_path):
+    runtime = load_runtime()
+    api_state = tmp_path / "api.json"
+    skill_state = tmp_path / "skill.json"
+    api_state.write_text(json.dumps({"final_trade_decision": "**Rating**: Buy"}), encoding="utf-8")
+    skill_state.write_text(json.dumps({"final_trade_decision": "**Rating**: Sell"}), encoding="utf-8")
+
+    result = runtime.parity_check(api_state, skill_state)
+
+    assert result["passed"] is False
+    assert "final_trade_decision differs" in result["differences"]

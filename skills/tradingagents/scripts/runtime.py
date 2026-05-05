@@ -467,3 +467,102 @@ def run_tool_request(report_dir: Path | str, request_path: Path | str | None = N
     state["skill_runtime"]["tool_transcripts"].append(str(transcript_path))
     save_state(report_dir, state)
     return transcript_path
+
+from assemble_report import assemble_report  # noqa: E402
+from tradingagents.agents.utils.rating import parse_rating  # noqa: E402
+
+
+def full_state_log_payload(state: dict[str, Any]) -> dict[str, Any]:
+    investment_debate = state["investment_debate_state"]
+    risk_debate = state["risk_debate_state"]
+    return {
+        "company_of_interest": state["company_of_interest"],
+        "trade_date": state["trade_date"],
+        "market_report": state["market_report"],
+        "sentiment_report": state["sentiment_report"],
+        "news_report": state["news_report"],
+        "fundamentals_report": state["fundamentals_report"],
+        "investment_debate_state": {
+            "bull_history": investment_debate["bull_history"],
+            "bear_history": investment_debate["bear_history"],
+            "history": investment_debate["history"],
+            "current_response": investment_debate["current_response"],
+            "judge_decision": investment_debate["judge_decision"],
+        },
+        "trader_investment_decision": state["trader_investment_plan"],
+        "risk_debate_state": {
+            "aggressive_history": risk_debate["aggressive_history"],
+            "conservative_history": risk_debate["conservative_history"],
+            "neutral_history": risk_debate["neutral_history"],
+            "history": risk_debate["history"],
+            "judge_decision": risk_debate["judge_decision"],
+        },
+        "investment_plan": state["investment_plan"],
+        "final_trade_decision": state["final_trade_decision"],
+    }
+
+
+def ensure_workflow_complete(state: dict[str, Any]) -> None:
+    runtime = state["skill_runtime"]
+    if runtime["step_index"] < len(runtime["step_order"]):
+        raise ValueError("cannot finalize before all role steps are applied")
+
+
+def write_full_state_log(report_dir: Path, state: dict[str, Any]) -> Path:
+    output_dir = report_dir / "TradingAgentsStrategy_logs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"full_states_log_{state['trade_date']}.json"
+    return write_json(output_path, full_state_log_payload(state))
+
+
+def finalize_run(report_dir: Path | str) -> dict[str, str]:
+    report_dir = Path(report_dir)
+    state = load_state(report_dir)
+    ensure_workflow_complete(state)
+    config = state["skill_runtime"]["config"]
+    complete_report = assemble_report(
+        report_dir,
+        selected_analysts=config["selected_analysts"],
+        results_dir=config["results_dir"],
+    )
+    state_log = write_full_state_log(report_dir, state)
+    rating = parse_rating(state["final_trade_decision"])
+    state["skill_runtime"]["status"] = "completed"
+    state["skill_runtime"]["complete_report"] = str(complete_report)
+    state["skill_runtime"]["state_log"] = str(state_log)
+    state["skill_runtime"]["rating"] = rating
+    save_state(report_dir, state)
+    return {
+        "complete_report": str(complete_report),
+        "state_log": str(state_log),
+        "rating": rating,
+    }
+
+
+def parity_check(api_state_path: Path | str, skill_state_path: Path | str) -> dict[str, Any]:
+    api_state = read_json(api_state_path)
+    skill_state = read_json(skill_state_path)
+    differences: list[str] = []
+    comparable_fields = [
+        "company_of_interest",
+        "trade_date",
+        "market_report",
+        "sentiment_report",
+        "news_report",
+        "fundamentals_report",
+        "investment_plan",
+        "trader_investment_decision",
+        "final_trade_decision",
+    ]
+    for field in comparable_fields:
+        if field in api_state and field in skill_state and api_state[field] != skill_state[field]:
+            differences.append(f"{field} differs")
+        elif field in api_state and field not in skill_state:
+            differences.append(f"{field} missing from skill state")
+    for nested_field in ("investment_debate_state", "risk_debate_state"):
+        if nested_field in api_state and nested_field not in skill_state:
+            differences.append(f"{nested_field} missing from skill state")
+    return {
+        "passed": not differences,
+        "differences": differences,
+    }

@@ -112,6 +112,7 @@ def initial_state(config: dict[str, Any], report_dir: Path) -> dict[str, Any]:
         "skill_runtime": {
             "config": config,
             "report_dir": str(report_dir),
+            "results_dir": str(Path(config["results_dir"]).resolve()),
             "step_order": build_step_order(config),
             "step_index": 0,
             "completed_steps": [],
@@ -511,7 +512,9 @@ def ensure_workflow_complete(state: dict[str, Any]) -> None:
 def write_full_state_log(report_dir: Path, state: dict[str, Any]) -> Path:
     output_dir = report_dir / "TradingAgentsStrategy_logs"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"full_states_log_{state['trade_date']}.json"
+    config = state.get("skill_runtime", {}).get("config", {})
+    trade_date = config.get("trade_date", state["trade_date"])
+    output_path = output_dir / f"full_states_log_{trade_date}.json"
     return write_json(output_path, full_state_log_payload(state))
 
 
@@ -519,11 +522,12 @@ def finalize_run(report_dir: Path | str) -> dict[str, str]:
     report_dir = Path(report_dir)
     state = load_state(report_dir)
     ensure_workflow_complete(state)
-    config = state["skill_runtime"]["config"]
+    runtime = state["skill_runtime"]
+    config = runtime["config"]
     complete_report = assemble_report(
         report_dir,
         selected_analysts=config["selected_analysts"],
-        results_dir=config["results_dir"],
+        results_dir=runtime.get("results_dir", Path(report_dir).resolve().parent),
     )
     state_log = write_full_state_log(report_dir, state)
     rating = parse_rating(state["final_trade_decision"])

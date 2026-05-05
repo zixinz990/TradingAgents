@@ -529,6 +529,35 @@ def test_finalize_run_writes_complete_report_state_log_and_rating(tmp_path, monk
     assert log["final_trade_decision"].startswith("**Rating**: Overweight")
 
 
+def test_finalize_run_with_relative_results_dir_is_independent_of_cwd(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent.resolve()
+    write_all_reports_for_one_analyst_run(report_dir)
+    apply_all_steps(runtime, report_dir)
+
+    monkeypatch.chdir(ROOT)
+    result = runtime.finalize_run(report_dir)
+
+    assert Path(result["complete_report"]).exists()
+    assert result["rating"] == "Overweight"
+
+
+def test_write_full_state_log_uses_config_trade_date_for_filename(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    state = read_json(state_path)
+    state["trade_date"] = "mutated-date"
+
+    output_path = runtime.write_full_state_log(state_path.parent, state)
+
+    assert output_path.name == "full_states_log_2026-05-04.json"
+
+
 def test_finalize_run_rejects_incomplete_workflow(tmp_path, monkeypatch):
     runtime = load_runtime()
     config = base_config(tmp_path, selected_analysts=["market"])

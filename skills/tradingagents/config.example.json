@@ -1,0 +1,17 @@
+{
+  "ticker": "NVDA",
+  "trade_date": "2026-05-04",
+  "selected_analysts": ["market", "social", "news", "fundamentals"],
+  "max_debate_rounds": 1,
+  "max_risk_discuss_rounds": 1,
+  "output_language": "English",
+  "results_dir": "reports/skill_runs",
+  "data_vendors": {
+    "core_stock_apis": "yfinance",
+    "technical_indicators": "yfinance",
+    "fundamental_data": "yfinance",
+    "news_data": "yfinance"
+  },
+  "tool_vendors": {},
+  "data_inputs": {}
+}

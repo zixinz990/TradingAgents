@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "source_of_truth_policy": "existing_code",
+  "description": "Role manifest for coding-agent skill runs. Prompt text is intentionally not copied here; read source_path and preserve the existing prompt wording.",
+  "roles": [
+    {
+      "id": "market_analyst",
+      "display_name": "Market Analyst",
+      "source_path": "tradingagents/agents/analysts/market_analyst.py",
+      "output_key": "market_report",
+      "report_path": "1_analysts/market.md",
+      "allowed_tools": ["get_stock_data", "get_indicators"]
+    },
+    {
+      "id": "social_media_analyst",
+      "display_name": "Social Media Analyst",
+      "source_path": "tradingagents/agents/analysts/social_media_analyst.py",
+      "output_key": "sentiment_report",
+      "report_path": "1_analysts/sentiment.md",
+      "allowed_tools": ["get_news"]
+    },
+    {
+      "id": "news_analyst",
+      "display_name": "News Analyst",
+      "source_path": "tradingagents/agents/analysts/news_analyst.py",
+      "output_key": "news_report",
+      "report_path": "1_analysts/news.md",
+      "allowed_tools": ["get_news", "get_global_news"]
+    },
+    {
+      "id": "fundamentals_analyst",
+      "display_name": "Fundamentals Analyst",
+      "source_path": "tradingagents/agents/analysts/fundamentals_analyst.py",
+      "output_key": "fundamentals_report",
+      "report_path": "1_analysts/fundamentals.md",
+      "allowed_tools": ["get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"]
+    },
+    {
+      "id": "bull_researcher",
+      "display_name": "Bull Researcher",
+      "source_path": "tradingagents/agents/researchers/bull_researcher.py",
+      "output_key": "investment_debate_state.bull_history",
+      "report_path": "2_research/bull.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "bear_researcher",
+      "display_name": "Bear Researcher",
+      "source_path": "tradingagents/agents/researchers/bear_researcher.py",
+      "output_key": "investment_debate_state.bear_history",
+      "report_path": "2_research/bear.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "research_manager",
+      "display_name": "Research Manager",
+      "source_path": "tradingagents/agents/managers/research_manager.py",
+      "output_key": "investment_plan",
+      "report_path": "2_research/manager.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "trader",
+      "display_name": "Trader",
+      "source_path": "tradingagents/agents/trader/trader.py",
+      "output_key": "trader_investment_plan",
+      "report_path": "3_trading/trader.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "risk_aggressive",
+      "display_name": "Aggressive Risk Analyst",
+      "source_path": "tradingagents/agents/risk_mgmt/aggressive_debator.py",
+      "output_key": "risk_debate_state.aggressive_history",
+      "report_path": "4_risk/aggressive.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "risk_conservative",
+      "display_name": "Conservative Risk Analyst",
+      "source_path": "tradingagents/agents/risk_mgmt/conservative_debator.py",
+      "output_key": "risk_debate_state.conservative_history",
+      "report_path": "4_risk/conservative.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "risk_neutral",
+      "display_name": "Neutral Risk Analyst",
+      "source_path": "tradingagents/agents/risk_mgmt/neutral_debator.py",
+      "output_key": "risk_debate_state.neutral_history",
+      "report_path": "4_risk/neutral.md",
+      "allowed_tools": []
+    },
+    {
+      "id": "portfolio_manager",
+      "display_name": "Portfolio Manager",
+      "source_path": "tradingagents/agents/managers/portfolio_manager.py",
+      "output_key": "final_trade_decision",
+      "report_path": "5_portfolio/decision.md",
+      "allowed_tools": []
+    }
+  ]
+}

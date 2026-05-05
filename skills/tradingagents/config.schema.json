@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TradingAgents Skill Config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ticker",
+    "trade_date",
+    "selected_analysts",
+    "max_debate_rounds",
+    "max_risk_discuss_rounds",
+    "results_dir"
+  ],
+  "properties": {
+    "ticker": {
+      "type": "string",
+      "pattern": "^(?!\\.+$)[A-Za-z0-9._\\-\\^]+$",
+      "maxLength": 32,
+      "description": "Exact instrument ticker to analyze. Must be safe as a path component."
+    },
+    "trade_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Analysis date in YYYY-MM-DD format."
+    },
+    "selected_analysts": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["market", "social", "news", "fundamentals"]
+      },
+      "description": "Ordered analyst list. This replaces the interactive CLI analyst picker."
+    },
+    "max_debate_rounds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of bull/bear debate rounds."
+    },
+    "max_risk_discuss_rounds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of aggressive/conservative/neutral risk discussion cycles."
+    },
+    "output_language": {
+      "type": "string",
+      "default": "English",
+      "description": "User-facing report language. Internal debate remains in English unless the source prompts say otherwise."
+    },
+    "results_dir": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+",
+      "description": "Safe relative base directory for generated role reports and complete_report.md."
+    },
+    "data_vendors": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "core_stock_apis": {
+          "type": "string",
+          "description": "Comma-separated vendor preference, e.g. yfinance or alpha_vantage,yfinance."
+        },
+        "technical_indicators": {
+          "type": "string",
+          "description": "Comma-separated vendor preference."
+        },
+        "fundamental_data": {
+          "type": "string",
+          "description": "Comma-separated vendor preference."
+        },
+        "news_data": {
+          "type": "string",
+          "description": "Comma-separated vendor preference."
+        }
+      }
+    },
+    "tool_vendors": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "get_stock_data",
+          "get_indicators",
+          "get_fundamentals",
+          "get_balance_sheet",
+          "get_cashflow",
+          "get_income_statement",
+          "get_news",
+          "get_global_news",
+          "get_insider_transactions"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(?:yfinance|alpha_vantage)(?:\\s*,\\s*(?:yfinance|alpha_vantage))*$"
+      },
+      "description": "Optional tool-level vendor overrides, keyed by supported dataflow method."
+    },
+    "data_inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Optional user-provided data files keyed by role or data category."
+    }
+  }
+}

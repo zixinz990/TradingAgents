@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "source_of_truth": {
+    "graph_setup": "tradingagents/graph/setup.py",
+    "conditional_logic": "tradingagents/graph/conditional_logic.py"
+  },
+  "description": "Machine-readable mirror of the current TradingAgents workflow. If this file disagrees with the source_of_truth files, the source code wins.",
+  "stages": [
+    {
+      "id": "analysts",
+      "default_order": [
+        "market_analyst",
+        "social_media_analyst",
+        "news_analyst",
+        "fundamentals_analyst"
+      ],
+      "config_key": "selected_analysts",
+      "tool_loop": {
+        "continue_when": "last_message.tool_calls is non-empty",
+        "then": "run the matching tools_<analyst> node and return to that analyst",
+        "otherwise": "run the matching Msg Clear <Analyst> node and advance"
+      },
+      "outputs": [
+        "market_report",
+        "sentiment_report",
+        "news_report",
+        "fundamentals_report"
+      ]
+    },
+    {
+      "id": "investment_debate",
+      "cycle": ["bull_researcher", "bear_researcher"],
+      "round_count_config": "max_debate_rounds",
+      "exit_when": "investment_debate_state.count >= 2 * max_debate_rounds",
+      "exit_to": "research_manager",
+      "output": "investment_debate_state.history"
+    },
+    {
+      "id": "research_manager",
+      "role": "research_manager",
+      "input": "investment_debate_state.history",
+      "output": "investment_plan",
+      "next": "trader"
+    },
+    {
+      "id": "trader",
+      "role": "trader",
+      "input": "investment_plan",
+      "output": "trader_investment_plan",
+      "next": "risk_debate"
+    },
+    {
+      "id": "risk_debate",
+      "cycle": [
+        "risk_aggressive",
+        "risk_conservative",
+        "risk_neutral"
+      ],
+      "round_count_config": "max_risk_discuss_rounds",
+      "exit_when": "risk_debate_state.count >= 3 * max_risk_discuss_rounds",
+      "exit_to": "portfolio_manager",
+      "output": "risk_debate_state.history"
+    },
+    {
+      "id": "portfolio_manager",
+      "role": "portfolio_manager",
+      "inputs": [
+        "investment_plan",
+        "trader_investment_plan",
+        "risk_debate_state.history",
+        "past_context"
+      ],
+      "output": "final_trade_decision",
+      "next": "END"
+    }
+  ]
+}

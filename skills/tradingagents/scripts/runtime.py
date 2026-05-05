@@ -134,9 +134,15 @@ def save_state(report_dir: Path | str, state: dict[str, Any]) -> Path:
     return write_json(state_path_for(report_dir), state)
 
 
+def remove_run_artifact(report_dir: Path, filename: str) -> None:
+    (report_dir / filename).unlink(missing_ok=True)
+
+
 def init_run(config_path: Path | str) -> Path:
     config = load_validated_config(config_path)
     report_dir = report_dir_for(config)
+    if (report_dir / STATE_FILENAME).exists():
+        raise ValueError(f"state.json already exists for this run: {report_dir / STATE_FILENAME}")
     report_dir.mkdir(parents=True, exist_ok=True)
     state = initial_state(config, report_dir)
     return save_state(report_dir, state)
@@ -358,7 +364,10 @@ def apply_step(report_dir: Path | str, role_id: str | None = None) -> Path:
     assert_required_markers(expected_role_id, role["report_path"], content)
     apply_role_content(state, expected_role_id, content)
     advance_runtime(state, expected_role_id)
-    return save_state(report_dir, state)
+    result = save_state(report_dir, state)
+    remove_run_artifact(report_dir, PACKET_FILENAME)
+    remove_run_artifact(report_dir, "tool_request.json")
+    return result
 
 
 from tradingagents.agents.utils.agent_utils import (  # noqa: E402
@@ -446,7 +455,9 @@ def next_tool_transcript_path(report_dir: Path, state: dict[str, Any], role_id: 
 
 def run_tool_request(report_dir: Path | str, request_path: Path | str | None = None) -> Path:
     report_dir = Path(report_dir)
-    request_path = Path(request_path) if request_path is not None else report_dir / "tool_request.json"
+    default_request_path = report_dir / "tool_request.json"
+    uses_default = request_path is None or Path(request_path).resolve() == default_request_path.resolve()
+    request_path = Path(request_path) if request_path is not None else default_request_path
     state = load_state(report_dir)
     request = load_tool_request(request_path)
     validate_tool_request(state, request)
@@ -467,6 +478,8 @@ def run_tool_request(report_dir: Path | str, request_path: Path | str | None = N
     write_json(transcript_path, transcript)
     state["skill_runtime"]["tool_transcripts"].append(str(transcript_path))
     save_state(report_dir, state)
+    if uses_default:
+        default_request_path.unlink(missing_ok=True)
     return transcript_path
 
 from assemble_report import assemble_report  # noqa: E402
@@ -543,6 +556,25 @@ def finalize_run(report_dir: Path | str) -> dict[str, str]:
     }
 
 
+def diff_values(path: str, api_value: Any, skill_value: Any, differences: list[str]) -> None:
+    if isinstance(api_value, dict) and isinstance(skill_value, dict):
+        all_keys = set(api_value) | set(skill_value)
+        for key in sorted(all_keys):
+            child_path = f"{path}.{key}"
+            if key not in api_value:
+                differences.append(f"{child_path} missing from api state")
+            elif key not in skill_value:
+                differences.append(f"{child_path} missing from skill state")
+            else:
+                diff_values(child_path, api_value[key], skill_value[key], differences)
+    elif isinstance(api_value, list) and isinstance(skill_value, list):
+        if api_value != skill_value:
+            differences.append(f"{path} differs")
+    else:
+        if api_value != skill_value:
+            differences.append(f"{path} differs")
+
+
 def parity_check(api_state_path: Path | str, skill_state_path: Path | str) -> dict[str, Any]:
     api_state = read_json(api_state_path)
     skill_state = read_json(skill_state_path)
@@ -559,13 +591,24 @@ def parity_check(api_state_path: Path | str, skill_state_path: Path | str) -> di
         "final_trade_decision",
     ]
     for field in comparable_fields:
-        if field in api_state and field in skill_state and api_state[field] != skill_state[field]:
-            differences.append(f"{field} differs")
+        if field in api_state and field in skill_state:
+            diff_values(field, api_state[field], skill_state[field], differences)
         elif field in api_state and field not in skill_state:
             differences.append(f"{field} missing from skill state")
+        elif field not in api_state and field in skill_state:
+            differences.append(f"{field} missing from api state")
     for nested_field in ("investment_debate_state", "risk_debate_state"):
         if nested_field in api_state and nested_field not in skill_state:
             differences.append(f"{nested_field} missing from skill state")
+        elif nested_field not in api_state and nested_field in skill_state:
+            differences.append(f"{nested_field} missing from api state")
+        elif nested_field in api_state and nested_field in skill_state:
+            diff_values(nested_field, api_state[nested_field], skill_state[nested_field], differences)
+    # Report fields present only in skill_state (not in comparable or nested lists)
+    known_fields = set(comparable_fields) | {"investment_debate_state", "risk_debate_state"}
+    for field in skill_state:
+        if field not in api_state and field not in known_fields:
+            differences.append(f"{field} missing from api state")
     return {
         "passed": not differences,
         "differences": differences,

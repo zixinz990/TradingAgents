@@ -671,3 +671,182 @@ def test_skill_runtime_end_to_end_without_llm_calls(tmp_path, monkeypatch):
         "portfolio_manager",
     ]
     assert (report_dir / "complete_report.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# New tests for review feedback fixes
+# ---------------------------------------------------------------------------
+
+
+def test_init_run_rejects_existing_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runtime = load_runtime()
+    config = base_config(tmp_path)
+    config_path = write_config(tmp_path, config)
+
+    runtime.init_run(config_path)
+
+    with pytest.raises(ValueError, match="state.json already exists"):
+        runtime.init_run(config_path)
+
+
+def test_run_tool_request_consumes_default_request_file(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+
+    class FakeTool:
+        def invoke(self, arguments):
+            return f"tool output for {arguments['symbol']}"
+
+    monkeypatch.setitem(runtime.TOOL_REGISTRY, "get_stock_data", FakeTool())
+    request_path = report_dir / "tool_request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "role_id": "market_analyst",
+                "tool": "get_stock_data",
+                "arguments": {"symbol": "NVDA", "start_date": "2026-04-01", "end_date": "2026-05-04"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    transcript_path = runtime.run_tool_request(report_dir)
+    assert transcript_path.exists()
+    assert not request_path.exists(), "default tool_request.json should be deleted after success"
+
+
+def test_run_tool_request_keeps_explicit_request_file(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+
+    class FakeTool:
+        def invoke(self, arguments):
+            return "ok"
+
+    monkeypatch.setitem(runtime.TOOL_REGISTRY, "get_stock_data", FakeTool())
+    external_request = tmp_path / "external_request.json"
+    external_request.write_text(
+        json.dumps(
+            {
+                "role_id": "market_analyst",
+                "tool": "get_stock_data",
+                "arguments": {"symbol": "NVDA", "start_date": "2026-04-01", "end_date": "2026-05-04"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime.run_tool_request(report_dir, request_path=external_request)
+    assert external_request.exists(), "explicit external request file must not be deleted"
+
+
+def test_apply_step_clears_stale_packet_and_default_tool_request(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+
+    # Create next_step.json by calling next_step
+    runtime.next_step(report_dir)
+    assert (report_dir / "next_step.json").exists()
+
+    # Write a default tool_request.json placeholder
+    default_request = report_dir / "tool_request.json"
+    default_request.write_text(json.dumps({"placeholder": True}), encoding="utf-8")
+
+    # Write the current role report and apply
+    write_role_report(report_dir, "1_analysts/market.md", "market report")
+    runtime.apply_step(report_dir)
+
+    assert not (report_dir / "next_step.json").exists(), "next_step.json should be removed after apply_step"
+    assert not default_request.exists(), "default tool_request.json should be removed after apply_step"
+
+
+def test_parity_check_reports_nested_and_symmetric_differences(tmp_path):
+    runtime = load_runtime()
+    api_state = tmp_path / "api.json"
+    skill_state = tmp_path / "skill.json"
+
+    api_state.write_text(
+        json.dumps(
+            {
+                "final_trade_decision": "**Rating**: Buy",
+                "investment_debate_state": {
+                    "bull_history": "bull api content",
+                    "judge_decision": "api judge",
+                },
+                "risk_debate_state": {
+                    "judge_decision": "api risk judge",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    skill_state.write_text(
+        json.dumps(
+            {
+                "final_trade_decision": "**Rating**: Buy",
+                "investment_debate_state": {
+                    "bull_history": "bull DIFFERENT content",
+                    "judge_decision": "api judge",
+                },
+                "risk_debate_state": {
+                    "judge_decision": "skill risk judge DIFFERENT",
+                },
+                "extra_field": "only in skill",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runtime.parity_check(api_state, skill_state)
+
+    assert result["passed"] is False
+    diffs = result["differences"]
+    assert any("investment_debate_state.bull_history" in d for d in diffs), (
+        f"expected investment_debate_state.bull_history diff, got: {diffs}"
+    )
+    assert any("risk_debate_state.judge_decision" in d for d in diffs), (
+        f"expected risk_debate_state.judge_decision diff, got: {diffs}"
+    )
+    assert any("extra_field" in d and "api" in d for d in diffs), (
+        f"expected extra_field missing-from-api diff, got: {diffs}"
+    )
+
+
+def test_skill_runner_cli_reports_validation_errors_without_traceback(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    config = base_config(tmp_path)
+    config["ticker"] = "../NVDA"  # invalid ticker triggers ValueError
+    config_path = write_config(tmp_path, config)
+    script = SKILL_DIR / "scripts" / "skill_runner.py"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = (
+        f"{ROOT}{os.pathsep}{env['PYTHONPATH']}"
+        if env.get("PYTHONPATH")
+        else str(ROOT)
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script), "init-run", str(config_path)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 1, f"expected exit 1, got {result.returncode}"
+    assert "error:" in result.stderr, f"expected 'error:' in stderr, got: {result.stderr!r}"
+    assert "Traceback" not in result.stderr, f"expected no traceback, got: {result.stderr!r}"
+    assert result.stdout == "", f"expected empty stdout, got: {result.stdout!r}"

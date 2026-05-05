@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import runtime
@@ -36,18 +37,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    if args.command == "init-run":
-        print(runtime.init_run(args.config))
-    elif args.command == "next-step":
-        print(runtime.next_step(args.report_dir))
-    elif args.command == "run-tool-request":
-        print(runtime.run_tool_request(args.report_dir, request_path=args.request))
-    elif args.command == "apply-step":
-        print(runtime.apply_step(args.report_dir, role_id=args.role_id))
-    elif args.command == "finalize-run":
-        print(json.dumps(runtime.finalize_run(args.report_dir), indent=2))
-    elif args.command == "parity-check":
-        print(json.dumps(runtime.parity_check(args.api_state, args.skill_state), indent=2))
+    try:
+        if args.command == "init-run":
+            print(runtime.init_run(args.config))
+        elif args.command == "next-step":
+            print(runtime.next_step(args.report_dir))
+        elif args.command == "run-tool-request":
+            print(runtime.run_tool_request(args.report_dir, request_path=args.request))
+        elif args.command == "apply-step":
+            print(runtime.apply_step(args.report_dir, role_id=args.role_id))
+        elif args.command == "finalize-run":
+            print(json.dumps(runtime.finalize_run(args.report_dir), indent=2))
+        elif args.command == "parity-check":
+            print(json.dumps(runtime.parity_check(args.api_state, args.skill_state), indent=2))
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

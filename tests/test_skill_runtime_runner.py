@@ -822,6 +822,28 @@ def test_parity_check_reports_nested_and_symmetric_differences(tmp_path):
     )
 
 
+def test_parity_check_reports_unknown_api_only_fields(tmp_path):
+    runtime = load_runtime()
+    api_state = tmp_path / "api.json"
+    skill_state = tmp_path / "skill.json"
+
+    api_state.write_text(
+        json.dumps({"final_trade_decision": "**Rating**: Buy", "api_only_field": "only in api"}),
+        encoding="utf-8",
+    )
+    skill_state.write_text(
+        json.dumps({"final_trade_decision": "**Rating**: Buy"}),
+        encoding="utf-8",
+    )
+
+    result = runtime.parity_check(api_state, skill_state)
+
+    assert result["passed"] is False
+    assert any("api_only_field" in d and "skill" in d for d in result["differences"]), (
+        f"expected api_only_field missing-from-skill diff, got: {result['differences']}"
+    )
+
+
 def test_skill_runner_cli_reports_validation_errors_without_traceback(tmp_path):
     import os
     import subprocess

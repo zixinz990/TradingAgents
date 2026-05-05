@@ -604,11 +604,14 @@ def parity_check(api_state_path: Path | str, skill_state_path: Path | str) -> di
             differences.append(f"{nested_field} missing from api state")
         elif nested_field in api_state and nested_field in skill_state:
             diff_values(nested_field, api_state[nested_field], skill_state[nested_field], differences)
-    # Report fields present only in skill_state (not in comparable or nested lists)
+    # Report unknown top-level fields missing from either side
     known_fields = set(comparable_fields) | {"investment_debate_state", "risk_debate_state"}
     for field in skill_state:
         if field not in api_state and field not in known_fields:
             differences.append(f"{field} missing from api state")
+    for field in api_state:
+        if field not in skill_state and field not in known_fields:
+            differences.append(f"{field} missing from skill state")
     return {
         "passed": not differences,
         "differences": differences,

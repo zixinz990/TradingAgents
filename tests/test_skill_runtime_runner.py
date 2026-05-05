@@ -190,3 +190,81 @@ def test_next_step_reports_completion_when_all_steps_applied(tmp_path, monkeypat
 
     assert packet["status"] == "complete"
     assert packet["message"] == "all role steps have been applied"
+
+
+def write_role_report(report_dir: Path, relative_path: str, content: str) -> Path:
+    output_path = report_dir / relative_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")
+    return output_path
+
+
+def test_apply_step_updates_analyst_report_and_advances_state(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    write_role_report(report_dir, "1_analysts/market.md", "market report")
+
+    runtime.apply_step(report_dir)
+    state = read_json(state_path)
+
+    assert state["market_report"] == "market report"
+    assert state["skill_runtime"]["step_index"] == 1
+    assert state["skill_runtime"]["completed_steps"] == ["market_analyst"]
+
+
+def test_apply_step_rejects_missing_required_marker(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    state = read_json(state_path)
+    manager_index = state["skill_runtime"]["step_order"].index("research_manager")
+    state["skill_runtime"]["step_index"] = manager_index
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    write_role_report(report_dir, "2_research/manager.md", "manager without marker")
+
+    with pytest.raises(ValueError, match="2_research/manager.md missing required marker"):
+        runtime.apply_step(report_dir)
+
+
+def test_apply_step_updates_debate_and_risk_counters(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    state = read_json(state_path)
+
+    state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index("bull_researcher")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    write_role_report(report_dir, "2_research/bull.md", "Bull case text")
+    runtime.apply_step(report_dir)
+    state = read_json(state_path)
+    assert state["investment_debate_state"]["count"] == 1
+    assert state["investment_debate_state"]["current_response"] == "Bull Analyst: Bull case text"
+    assert "Bull Analyst: Bull case text" in state["investment_debate_state"]["bull_history"]
+
+    state["skill_runtime"]["step_index"] = state["skill_runtime"]["step_order"].index("risk_aggressive")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    write_role_report(report_dir, "4_risk/aggressive.md", "Aggressive risk text")
+    runtime.apply_step(report_dir)
+    state = read_json(state_path)
+    assert state["risk_debate_state"]["count"] == 1
+    assert state["risk_debate_state"]["latest_speaker"] == "Aggressive"
+    assert state["risk_debate_state"]["current_aggressive_response"] == "Aggressive Analyst: Aggressive risk text"
+
+
+def test_apply_step_rejects_unexpected_role_id(tmp_path, monkeypatch):
+    runtime = load_runtime()
+    config = base_config(tmp_path, selected_analysts=["market"])
+    monkeypatch.chdir(tmp_path)
+    state_path = runtime.init_run(write_config(tmp_path, config))
+    report_dir = state_path.parent
+    write_role_report(report_dir, "1_analysts/market.md", "market report")
+
+    with pytest.raises(ValueError, match="cannot apply role trader while current role is market_analyst"):
+        runtime.apply_step(report_dir, role_id="trader")

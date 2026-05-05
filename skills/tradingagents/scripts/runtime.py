@@ -227,3 +227,134 @@ def next_step(report_dir: Path | str) -> Path:
             },
         )
     return write_json(packet_path, build_role_packet(state, role_id))
+
+
+ANALYST_OUTPUT_FIELDS = {
+    "market_analyst": "market_report",
+    "social_media_analyst": "sentiment_report",
+    "news_analyst": "news_report",
+    "fundamentals_analyst": "fundamentals_report",
+}
+
+INVESTMENT_DEBATE_ROLES = {
+    "bull_researcher": ("Bull Analyst", "bull_history"),
+    "bear_researcher": ("Bear Analyst", "bear_history"),
+}
+
+RISK_DEBATE_ROLES = {
+    "risk_aggressive": (
+        "Aggressive Analyst",
+        "aggressive_history",
+        "current_aggressive_response",
+        "Aggressive",
+    ),
+    "risk_conservative": (
+        "Conservative Analyst",
+        "conservative_history",
+        "current_conservative_response",
+        "Conservative",
+    ),
+    "risk_neutral": (
+        "Neutral Analyst",
+        "neutral_history",
+        "current_neutral_response",
+        "Neutral",
+    ),
+}
+
+
+def normalize_speaker_content(prefix: str, content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith(f"{prefix}:"):
+        return stripped
+    return f"{prefix}: {stripped}"
+
+
+def assert_required_markers(role_id: str, relative_path: str, content: str) -> None:
+    for marker in role_required_markers(role_id):
+        if marker not in content:
+            raise ValueError(f"{relative_path} missing required marker {marker}")
+    if role_id == "trader":
+        import re
+
+        if re.search(r"^FINAL TRANSACTION PROPOSAL: \*\*(BUY|HOLD|SELL)\*\*$", content, re.MULTILINE) is None:
+            raise ValueError(f"{relative_path} missing valid final transaction proposal")
+
+
+def role_report_content(report_dir: Path, role: dict[str, Any]) -> str:
+    report_path = report_dir / role["report_path"]
+    if not report_path.exists():
+        raise FileNotFoundError(f"missing required report fragment: {role['report_path']}")
+    return report_path.read_text(encoding="utf-8").strip()
+
+
+def apply_investment_debate(state: dict[str, Any], role_id: str, content: str) -> None:
+    prefix, history_key = INVESTMENT_DEBATE_ROLES[role_id]
+    argument = normalize_speaker_content(prefix, content)
+    debate = state["investment_debate_state"]
+    debate["history"] = debate.get("history", "") + "\n" + argument
+    debate[history_key] = debate.get(history_key, "") + "\n" + argument
+    debate["current_response"] = argument
+    debate["count"] = debate["count"] + 1
+
+
+def apply_risk_debate(state: dict[str, Any], role_id: str, content: str) -> None:
+    prefix, history_key, current_key, latest_speaker = RISK_DEBATE_ROLES[role_id]
+    argument = normalize_speaker_content(prefix, content)
+    debate = state["risk_debate_state"]
+    debate["history"] = debate.get("history", "") + "\n" + argument
+    debate[history_key] = debate.get(history_key, "") + "\n" + argument
+    debate[current_key] = argument
+    debate["latest_speaker"] = latest_speaker
+    debate["count"] = debate["count"] + 1
+
+
+def apply_role_content(state: dict[str, Any], role_id: str, content: str) -> None:
+    if role_id in ANALYST_OUTPUT_FIELDS:
+        state[ANALYST_OUTPUT_FIELDS[role_id]] = content
+    elif role_id in INVESTMENT_DEBATE_ROLES:
+        apply_investment_debate(state, role_id, content)
+    elif role_id == "research_manager":
+        debate = state["investment_debate_state"]
+        debate["judge_decision"] = content
+        debate["current_response"] = content
+        state["investment_plan"] = content
+    elif role_id == "trader":
+        state["trader_investment_plan"] = content
+        state["sender"] = "Trader"
+    elif role_id in RISK_DEBATE_ROLES:
+        apply_risk_debate(state, role_id, content)
+    elif role_id == "portfolio_manager":
+        debate = state["risk_debate_state"]
+        debate["judge_decision"] = content
+        debate["latest_speaker"] = "Judge"
+        state["final_trade_decision"] = content
+    else:
+        raise ValueError(f"unknown role id: {role_id}")
+
+
+def advance_runtime(state: dict[str, Any], role_id: str) -> None:
+    runtime = state["skill_runtime"]
+    runtime["completed_steps"].append(role_id)
+    runtime["step_index"] = runtime["step_index"] + 1
+    if runtime["step_index"] >= len(runtime["step_order"]):
+        runtime["status"] = "ready_to_finalize"
+
+
+def apply_step(report_dir: Path | str, role_id: str | None = None) -> Path:
+    report_dir = Path(report_dir)
+    state = load_state(report_dir)
+    expected_role_id = current_role_id(state)
+    if expected_role_id is None:
+        raise ValueError("all role steps have already been applied")
+    if role_id is not None and role_id != expected_role_id:
+        raise ValueError(
+            f"cannot apply role {role_id} while current role is {expected_role_id}"
+        )
+
+    role = roles_by_id()[expected_role_id]
+    content = role_report_content(report_dir, role)
+    assert_required_markers(expected_role_id, role["report_path"], content)
+    apply_role_content(state, expected_role_id, content)
+    advance_runtime(state, expected_role_id)
+    return save_state(report_dir, state)

@@ -579,3 +579,44 @@ def test_parity_check_reports_structural_differences(tmp_path):
 
     assert result["passed"] is False
     assert "final_trade_decision differs" in result["differences"]
+
+
+def test_skill_runner_cli_init_and_next_step(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    config = base_config(tmp_path, selected_analysts=["market"])
+    config_path = write_config(tmp_path, config)
+    script = SKILL_DIR / "scripts" / "skill_runner.py"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = (
+        f"{ROOT}{os.pathsep}{env['PYTHONPATH']}"
+        if env.get("PYTHONPATH")
+        else str(ROOT)
+    )
+
+    init_result = subprocess.run(
+        [sys.executable, str(script), "init-run", str(config_path)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    state_path = Path(init_result.stdout.strip())
+    if not state_path.is_absolute():
+        state_path = tmp_path / state_path
+    assert state_path.exists()
+
+    next_result = subprocess.run(
+        [sys.executable, str(script), "next-step", str(state_path.parent)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    packet_path = Path(next_result.stdout.strip())
+    packet = read_json(packet_path)
+    assert packet["role_id"] == "market_analyst"

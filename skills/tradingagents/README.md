@@ -59,24 +59,63 @@ Validate the config before asking an agent to run it:
 python skills/tradingagents/scripts/validate_config.py my-trading-run.json
 ```
 
-## Prompt Claude Code
+## Run with the deterministic skill runner
 
-Use a prompt like this:
+Initialize the run:
 
-```text
-Use the tradingagents skill with config at my-trading-run.json.
-Follow SKILL.md exactly. Use the existing prompt files under tradingagents/agents/ and workflow files under tradingagents/graph/ as source of truth.
-Do not instantiate TradingAgents LLM provider clients.
-Generate all role reports, then run the report assembler.
+```bash
+python skills/tradingagents/scripts/skill_runner.py init-run my-trading-run.json
 ```
 
-Claude Code should read:
+The command prints:
 
-1. `SKILL.md`
-2. `prompt_manifest.json`
-3. `workflow.json`
-4. The source prompt/workflow files referenced by those manifests
-5. Your JSON config
+```text
+reports/skill_runs/NVDA_2026-05-04/state.json
+```
+
+Generate the next role packet:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py next-step reports/skill_runs/NVDA_2026-05-04
+```
+
+Read `next_step.json`, then use the host coding agent as the model runtime for that role. The agent should read the packet's `source_path`, use only the packet's `input_state`, write the role report to `output_path`, and preserve any required markers.
+
+When an analyst needs live data, write `tool_request.json` in the run directory:
+
+```json
+{
+  "role_id": "market_analyst",
+  "tool": "get_stock_data",
+  "arguments": {
+    "symbol": "NVDA",
+    "start_date": "2026-04-01",
+    "end_date": "2026-05-04"
+  }
+}
+```
+
+Run the approved tool request through the deterministic gate:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py run-tool-request reports/skill_runs/NVDA_2026-05-04
+```
+
+After the role report exists, apply it:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py apply-step reports/skill_runs/NVDA_2026-05-04 --role-id market_analyst
+```
+
+Repeat `next-step`, role execution, and `apply-step` until `next_step.json` reports completion.
+
+Finalize the run:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py finalize-run reports/skill_runs/NVDA_2026-05-04
+```
+
+Finalization creates `complete_report.md`, writes `TradingAgentsStrategy_logs/full_states_log_<TRADE_DATE>.json`, updates `state.json`, and returns the parsed final rating.
 
 ## Output layout
 
@@ -111,16 +150,6 @@ complete_report.md
 ```
 
 If you select only some analysts, only those selected analyst report files are required. The downstream research, trader, risk, and portfolio files are always required for a complete run.
-
-## Assemble the final report
-
-After the role reports exist, run:
-
-```bash
-python skills/tradingagents/scripts/assemble_report.py reports/skill_runs/NVDA_2026-05-04 --config my-trading-run.json
-```
-
-The assembler fails if required fragments are missing, so a successful run means `complete_report.md` was created from the expected role outputs.
 
 ## Important constraints
 

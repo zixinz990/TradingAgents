@@ -44,30 +44,60 @@ Do not instantiate provider clients from `tradingagents/llm_clients/` for a skil
 
 Market, news, and fundamentals data still need a source. Prefer user-provided files when available. If live data is required, use existing deterministic dataflow utilities or approved MCP/tools, then include the raw data references in the generated report.
 
-## Workflow
+## Deterministic Runtime Workflow
 
-Follow the current workflow exactly:
+Use the deterministic runner scripts for skill runs. They preserve the original workflow order, state transitions, role counters, report paths, tool allowlists, final report assembly, and rating extraction while keeping the host coding agent as the model runtime.
 
-1. Analyst team runs in `selected_analysts` order. Each analyst may fetch its allowed data, then writes its report.
-2. Bull researcher and bear researcher debate for `max_debate_rounds` cycles.
-3. Research Manager evaluates the debate and writes the investment plan.
-4. Trader converts the investment plan into a transaction proposal.
-5. Aggressive, Conservative, and Neutral risk analysts debate for `max_risk_discuss_rounds` cycles.
-6. Portfolio Manager writes the final decision.
+Start a run:
 
-Use `workflow.json` for machine-readable stage metadata, but treat `tradingagents/graph/setup.py` and `tradingagents/graph/conditional_logic.py` as authoritative.
+```bash
+python skills/tradingagents/scripts/skill_runner.py init-run path/to/config.json
+```
 
-## Role Execution Rules
+The command prints the path to `state.json` under `results_dir/<TICKER>_<TRADE_DATE>/`.
 
 For each role:
 
-1. Read the role entry from `prompt_manifest.json`.
-2. Read the role's `source_path` file.
-3. Preserve the current prompt wording and role intent from that source file.
-4. Provide only the role's allowed context and prior reports.
-5. Write the role output to the configured report path.
+```bash
+python skills/tradingagents/scripts/skill_runner.py next-step path/to/results/TICKER_YYYY-MM-DD
+```
 
-Do not let a later role rewrite earlier reports. Later roles may quote or critique earlier outputs, matching the original multi-agent handoff.
+Read the generated `next_step.json`. It contains the role id, source prompt path, allowed tools, input state, required markers, `tool_request.json` path, and output path.
+
+If an analyst needs live data, write `tool_request.json` using the role id, approved tool name, and JSON arguments, then run:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py run-tool-request path/to/results/TICKER_YYYY-MM-DD
+```
+
+Use the generated tool transcript as context for the same role. Do not call tools outside the runner.
+
+After writing the role report to the packet's `output_path`, apply it:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py apply-step path/to/results/TICKER_YYYY-MM-DD --role-id ROLE_ID
+```
+
+Repeat `next-step` and `apply-step` until `next_step.json` reports completion. Then finalize:
+
+```bash
+python skills/tradingagents/scripts/skill_runner.py finalize-run path/to/results/TICKER_YYYY-MM-DD
+```
+
+Finalization writes `complete_report.md`, `TradingAgentsStrategy_logs/full_states_log_<TRADE_DATE>.json`, updates `state.json`, and returns the parsed final rating.
+
+## Role Execution Rules
+
+For each generated `next_step.json` packet:
+
+1. Read the role entry from the packet.
+2. Read the role's `source_path` file from the repository root.
+3. Preserve the current prompt wording and role intent from that source file.
+4. Use only the packet's `input_state`, approved tool transcripts, and allowed tools.
+5. Write the role output exactly to the packet's `output_path`.
+6. Run `apply-step` before moving to the next role.
+
+Only the runner may advance `state.json`. Do not let a later role rewrite earlier reports. Later roles may quote or critique earlier outputs, matching the original multi-agent handoff.
 
 ## Output Contract
 

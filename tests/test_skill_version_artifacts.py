@@ -20,6 +20,8 @@ EXPECTED_SKILL_FILES = [
     SKILL_DIR / "workflow.json",
     SKILL_DIR / "scripts" / "validate_config.py",
     SKILL_DIR / "scripts" / "assemble_report.py",
+    SKILL_DIR / "scripts" / "runtime.py",
+    SKILL_DIR / "scripts" / "skill_runner.py",
 ]
 
 EXPECTED_ROLE_IDS = {
@@ -76,6 +78,19 @@ def test_skill_declares_existing_prompts_and_workflow_as_source_of_truth():
     assert "tradingagents/graph/conditional_logic.py" in skill_text
     assert "pip install -e ." in skill_text
     assert "importable" in skill_text
+
+
+def test_skill_docs_explain_deterministic_runner_usage():
+    readme = (SKILL_DIR / "README.md").read_text(encoding="utf-8")
+    skill_text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    for text in (readme, skill_text):
+        assert "skill_runner.py init-run" in text
+        assert "skill_runner.py next-step" in text
+        assert "skill_runner.py apply-step" in text
+        assert "skill_runner.py finalize-run" in text
+        assert "tool_request.json" in text
+        assert "state.json" in text
 
 
 def test_prompt_manifest_covers_all_current_agent_roles_without_copying_prompts():

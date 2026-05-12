@@ -1,3 +1,4 @@
 [submodule "reports"]
 	path = reports
 	url = https://github.com/zixinz990/TradingAgentsReports.git
+	branch = main

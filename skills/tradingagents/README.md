@@ -9,7 +9,7 @@ The key difference from the interactive TradingAgents CLI is the model runtime: 
 The easiest way to use this skill is the run to completion mode: ask a coding agent to run the whole packet loop for you.
 
 ```text
-Use the tradingagents skill with this config and run it to completion: path/to/config.json
+Use the tradingagents skill with this config and run it to completion: @JSON_FILE_NAME . Each subagent must use GPT-5.5 with extra high effort. Use the Python env in the current folder with uv.
 ```
 
 In this mode, the agent should validate the config, initialize the run, process every `next_step.json` packet, write each role report, apply each step, run approved `tool_request.json` requests when data is needed, call `finalize-run`, and return the final rating plus report paths.
